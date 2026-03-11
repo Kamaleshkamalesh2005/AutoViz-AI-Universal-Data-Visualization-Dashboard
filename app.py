@@ -245,13 +245,14 @@ def start_card(title: str, subtitle: str = "") -> None:
         <div class="card-shell">
             <div class="card-title">{title}</div>
             <div class="card-subtitle">{subtitle}</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
 
 def end_card() -> None:
-    st.markdown("</div>", unsafe_allow_html=True)
+    return None
 
 
 def finalize_plotly_figure(fig, height: int = 360):
