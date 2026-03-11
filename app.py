@@ -181,6 +181,11 @@ def load_dataset(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(BytesIO(file_bytes))
 
 
+@st.cache_data(show_spinner=False)
+def load_data(file_bytes: bytes) -> pd.DataFrame:
+    return pd.read_csv(BytesIO(file_bytes))
+
+
 def ensure_unique_columns(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     used_names: set[str] = set()
     seen_counts: dict[str, int] = {}
@@ -292,8 +297,7 @@ def end_card() -> None:
 
 def finalize_plotly_figure(fig, height: int = CHART_HEIGHT):
     fig.update_layout(height=height, **PLOTLY_LAYOUT)
-    fig.update_xaxes(automargin=True)
-    fig.update_yaxes(automargin=True)
+    fig.update_layout(margin=dict(l=10, r=10, t=35, b=10), autosize=True)
     return fig
 
 
@@ -305,10 +309,7 @@ def render_dataframe(dataframe: pd.DataFrame, hide_index: bool = False) -> None:
 
 
 def render_plotly(fig) -> None:
-    try:
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
-    except TypeError:
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "responsive": True})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
 
 
 def truncate_label(value: object, max_length: int = MAX_CATEGORY_LABEL_LENGTH) -> str:
@@ -705,7 +706,14 @@ def generate_dataset_insights(dataframe: pd.DataFrame, numeric_columns: list[str
     return top_corr, top_variance, summary_text
 
 
-def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y_axis: str | None):
+def render_custom_chart(
+    dataframe: pd.DataFrame,
+    chart_type: str,
+    x_axis: str,
+    y_axis: str | None,
+    numeric_columns: list[str],
+    categorical_columns: list[str],
+):
     plot_df = sample_dataframe(dataframe, max_rows=4000)
 
     def _select_xy_frame(require_y: bool = True) -> pd.DataFrame | None:
@@ -719,6 +727,8 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
 
     chart_key = chart_type.lower()
     if chart_key == "scatter":
+        if x_axis not in numeric_columns or (y_axis and y_axis not in numeric_columns):
+            return None, "Scatter chart requires numeric X and Y columns."
         if not y_axis:
             return None, "Select both X and Y axes for a scatter chart."
         plot_df_selected = _select_xy_frame(require_y=True)
@@ -731,6 +741,8 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             return None, "Selected columns are not suitable for a scatter chart."
         fig = px.scatter(plot_df_selected, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="tealrose")
     elif chart_key == "line":
+        if y_axis and y_axis not in numeric_columns:
+            return None, "Line chart Y-axis must be numeric."
         if not y_axis:
             return None, "Select both X and Y axes for a line chart."
         plot_df_selected = _select_xy_frame(require_y=True)
@@ -742,7 +754,11 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             return None, "Selected columns are not suitable for a line chart."
         fig = px.line(plot_df_selected, x=x_axis, y=y_axis)
     elif chart_key == "bar":
+        if x_axis not in categorical_columns:
+            return None, "Bar chart requires a categorical X-axis column."
         if y_axis:
+            if y_axis not in numeric_columns:
+                return None, "Bar chart Y-axis must be numeric when provided."
             plot_df_selected = _select_xy_frame(require_y=True)
             if plot_df_selected is None or plot_df_selected.empty:
                 return None, "No valid rows are available for the selected bar chart columns."
@@ -754,6 +770,8 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             fig = px.bar(counts, x=f"{x_axis}_label", y="Count", color="Count", color_continuous_scale="viridis")
             fig.update_xaxes(title_text=x_axis, tickangle=-25)
     elif chart_key == "histogram":
+        if x_axis not in numeric_columns:
+            return None, "Histogram requires a numeric column."
         plot_df_selected = _select_xy_frame(require_y=False)
         if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected histogram column."
@@ -763,7 +781,11 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             return None, "Selected column is not suitable for a histogram."
         fig = px.histogram(plot_df_selected, x=x_axis, nbins=30, color_discrete_sequence=["#32d4ff"])
     elif chart_key == "pie":
+        if x_axis not in categorical_columns:
+            return None, "Pie chart requires a categorical label column."
         if y_axis:
+            if y_axis not in numeric_columns:
+                return None, "Pie chart values column must be numeric when provided."
             pie_df = _select_xy_frame(require_y=True)
             if pie_df.empty:
                 return None, "No valid rows are available for the selected pie chart columns."
@@ -775,6 +797,8 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             fig = px.pie(counts, names=f"{x_axis}_label", values="Count")
     elif chart_key == "box":
         selected_y = y_axis or x_axis
+        if selected_y not in numeric_columns:
+            return None, "Box plot requires a numeric Y-axis column."
         if y_axis and x_axis != selected_y:
             plot_df_selected = plot_df[[x_axis, selected_y]].dropna()
         else:
@@ -844,7 +868,7 @@ def main() -> None:
         return
 
     try:
-        raw_df = load_dataset(file_bytes)
+        raw_df = load_data(file_bytes)
     except Exception as error:
         st.error(f"Unable to read the CSV file: {error}")
         return
@@ -859,6 +883,7 @@ def main() -> None:
                 st.write(f"... and {len(renamed_columns) - 20} more")
 
     dataframe, numeric_columns, categorical_columns, datetime_columns = detect_column_types(dataframe)
+    viz_dataframe = sample_dataframe(dataframe, max_rows=5000)
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Dataset Information")
@@ -950,16 +975,23 @@ def main() -> None:
     with metric_cols[3]:
         render_metric_card("Categorical Features", f"{len(categorical_columns):,}", "linear-gradient(90deg, #ff6b9f, #8a7dff)")
 
-    histograms = generate_histograms(dataframe, effective_numeric_columns)
-    scatter_plots = generate_scatter_plots(dataframe, effective_numeric_columns)
-    pie_charts = generate_pie_charts(dataframe, effective_categorical_columns)
-    bar_charts = generate_bar_charts(dataframe, effective_categorical_columns)
-    box_plots = generate_box_plots(dataframe, effective_numeric_columns)
-    line_charts = generate_line_charts(dataframe, effective_numeric_columns, effective_datetime_columns)
-    correlation_heatmap = generate_heatmap(dataframe, effective_numeric_columns)
-    custom_chart, custom_error = render_custom_chart(dataframe, chart_type, x_axis, y_axis)
-    kde_figs = generate_kde_plots(dataframe, effective_numeric_columns)
-    count_figs = generate_count_plots(dataframe, effective_categorical_columns)
+    histograms = generate_histograms(viz_dataframe, effective_numeric_columns)
+    scatter_plots = generate_scatter_plots(viz_dataframe, effective_numeric_columns)
+    pie_charts = generate_pie_charts(viz_dataframe, effective_categorical_columns)
+    bar_charts = generate_bar_charts(viz_dataframe, effective_categorical_columns)
+    box_plots = generate_box_plots(viz_dataframe, effective_numeric_columns)
+    line_charts = generate_line_charts(viz_dataframe, effective_numeric_columns, effective_datetime_columns)
+    correlation_heatmap = generate_heatmap(viz_dataframe, effective_numeric_columns)
+    custom_chart, custom_error = render_custom_chart(
+        viz_dataframe,
+        chart_type,
+        x_axis,
+        y_axis,
+        effective_numeric_columns,
+        effective_categorical_columns,
+    )
+    kde_figs = generate_kde_plots(viz_dataframe, effective_numeric_columns)
+    count_figs = generate_count_plots(viz_dataframe, effective_categorical_columns)
 
     st.markdown('<div class="section-title">Automatic Chart Generation</div>', unsafe_allow_html=True)
     row2 = st.columns(3)
