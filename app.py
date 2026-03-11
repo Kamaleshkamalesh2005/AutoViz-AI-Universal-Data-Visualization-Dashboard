@@ -327,6 +327,28 @@ def get_viable_numeric_columns(dataframe: pd.DataFrame, numeric_columns: list[st
     return viable_columns
 
 
+def to_numeric_plot_df(dataframe: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    numeric_df = dataframe[columns].copy()
+    for column in columns:
+        numeric_df[column] = pd.to_numeric(numeric_df[column], errors="coerce")
+    return numeric_df
+
+
+def figure_has_points(fig) -> bool:
+    if fig is None:
+        return False
+    if not hasattr(fig, "data") or not fig.data:
+        return False
+    for trace in fig.data:
+        if hasattr(trace, "x") and trace.x is not None and len(trace.x) > 0:
+            return True
+        if hasattr(trace, "y") and trace.y is not None and len(trace.y) > 0:
+            return True
+        if hasattr(trace, "labels") and trace.labels is not None and len(trace.labels) > 0:
+            return True
+    return False
+
+
 def get_viable_categorical_columns(dataframe: pd.DataFrame, categorical_columns: list[str], min_unique_values: int = 2) -> list[str]:
     viable_columns: list[str] = []
     for column in categorical_columns:
@@ -353,14 +375,16 @@ def build_categorical_counts(dataframe: pd.DataFrame, column: str, limit: int) -
 def generate_histograms(dataframe: pd.DataFrame, numeric_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
-    sampled = sample_dataframe(dataframe[viable_columns], max_rows=4000) if viable_columns else pd.DataFrame()
+    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=4000) if viable_columns else pd.DataFrame()
     palette = ["#32d4ff", "#8a7dff", "#ff6b9f", "#00d084"]
     for index, column in enumerate(viable_columns[:4]):
         plot_df = sampled[[column]].dropna()
-        if plot_df.empty:
+        if len(plot_df) < 2:
             continue
         fig = px.histogram(plot_df, x=column, nbins=30, color_discrete_sequence=[palette[index % len(palette)]])
-        figures.append(finalize_plotly_figure(fig, height=340))
+        fig = finalize_plotly_figure(fig, height=340)
+        if figure_has_points(fig):
+            figures.append(fig)
     return figures
 
 
@@ -370,9 +394,10 @@ def generate_kde_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) -> l
     if not viable_columns:
         return figures
 
+    numeric_df = to_numeric_plot_df(dataframe, viable_columns)
     for column in viable_columns[:3]:
-        plot_df = sample_dataframe(dataframe[[column]].dropna(), max_rows=1500)
-        if plot_df.empty:
+        plot_df = sample_dataframe(numeric_df[[column]].dropna(), max_rows=1500)
+        if len(plot_df) < 3:
             continue
         fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
         sns.kdeplot(plot_df[column], fill=True, color="#32d4ff", linewidth=2, ax=ax)
@@ -453,14 +478,14 @@ def generate_scatter_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) 
     if len(viable_columns) < 2:
         return figures
 
-    sampled = sample_dataframe(dataframe[viable_columns], max_rows=2500)
+    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=2500)
     ranked = dataframe[viable_columns].var(numeric_only=True).sort_values(ascending=False).index.tolist()
     selected = ranked[: min(4, len(ranked))]
     for index in range(len(selected) - 1):
         x_axis = selected[index]
         y_axis = selected[index + 1]
         plot_df = sampled[[x_axis, y_axis]].dropna()
-        if plot_df.empty:
+        if len(plot_df) < 2:
             continue
         fig = px.scatter(
             plot_df,
@@ -471,44 +496,54 @@ def generate_scatter_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) 
             opacity=0.8,
         )
         fig.update_layout(coloraxis_showscale=False)
-        figures.append(finalize_plotly_figure(fig, height=340))
+        fig = finalize_plotly_figure(fig, height=340)
+        if figure_has_points(fig):
+            figures.append(fig)
     return figures
 
 
 def generate_line_charts(dataframe: pd.DataFrame, numeric_columns: list[str], datetime_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
+    numeric_df = to_numeric_plot_df(dataframe, viable_columns) if viable_columns else pd.DataFrame()
     if datetime_columns and viable_columns:
         time_column = datetime_columns[0]
         line_column = viable_columns[0]
-        plot_df = dataframe[[time_column, line_column]].dropna(subset=[time_column, line_column]).sort_values(time_column)
+        plot_df = pd.concat([dataframe[[time_column]], numeric_df[[line_column]]], axis=1)
+        plot_df = plot_df.dropna(subset=[time_column, line_column]).sort_values(time_column)
         plot_df = sample_dataframe(plot_df, max_rows=3000)
-        if plot_df.empty:
+        if len(plot_df) < 2:
             return figures
         line_fig = px.line(plot_df, x=time_column, y=line_column, color_discrete_sequence=["#32d4ff"])
-        figures.append(finalize_plotly_figure(line_fig, height=340))
+        line_fig = finalize_plotly_figure(line_fig, height=340)
+        if figure_has_points(line_fig):
+            figures.append(line_fig)
         return figures
 
     if viable_columns:
         line_column = viable_columns[0]
-        plot_df = sample_dataframe(dataframe[[line_column]].dropna().reset_index(), max_rows=2500)
-        if plot_df.empty:
+        plot_df = sample_dataframe(numeric_df[[line_column]].dropna().reset_index(), max_rows=2500)
+        if len(plot_df) < 2:
             return figures
         line_fig = px.line(plot_df, x="index", y=line_column, color_discrete_sequence=["#32d4ff"])
-        figures.append(finalize_plotly_figure(line_fig, height=340))
+        line_fig = finalize_plotly_figure(line_fig, height=340)
+        if figure_has_points(line_fig):
+            figures.append(line_fig)
     return figures
 
 
 def generate_box_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
-    sampled = sample_dataframe(dataframe[viable_columns], max_rows=3500) if viable_columns else pd.DataFrame()
+    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=3500) if viable_columns else pd.DataFrame()
     for column in viable_columns[:4]:
         plot_df = sampled[[column]].dropna()
-        if plot_df.empty:
+        if len(plot_df) < 2:
             continue
         fig = px.box(plot_df, y=column, color_discrete_sequence=["#ffb84d"], points="outliers")
-        figures.append(finalize_plotly_figure(fig, height=340))
+        fig = finalize_plotly_figure(fig, height=340)
+        if figure_has_points(fig):
+            figures.append(fig)
     return figures
 
 
@@ -516,7 +551,9 @@ def generate_heatmap(dataframe: pd.DataFrame, numeric_columns: list[str]) -> plt
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
     if len(viable_columns) < 2:
         return None
-    correlation = dataframe[viable_columns].corr(numeric_only=True)
+    correlation = to_numeric_plot_df(dataframe, viable_columns).corr(numeric_only=True)
+    if correlation.empty:
+        return None
     fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
     sns.heatmap(correlation, cmap="mako", annot=True, fmt=".2f", linewidths=0.5, ax=ax)
     fig.patch.set_facecolor("#101a2d")
@@ -600,6 +637,11 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
         plot_df_selected = _select_xy_frame(require_y=True)
         if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected scatter chart columns."
+        for numeric_col in [x_axis, y_axis]:
+            plot_df_selected[numeric_col] = pd.to_numeric(plot_df_selected[numeric_col], errors="coerce")
+        plot_df_selected = plot_df_selected.dropna(subset=[x_axis, y_axis])
+        if len(plot_df_selected) < 2:
+            return None, "Selected columns are not suitable for a scatter chart."
         fig = px.scatter(plot_df_selected, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="tealrose")
     elif chart_key == "line":
         if not y_axis:
@@ -607,7 +649,10 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
         plot_df_selected = _select_xy_frame(require_y=True)
         if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected line chart columns."
-        plot_df_selected = plot_df_selected.sort_values(x_axis)
+        plot_df_selected[y_axis] = pd.to_numeric(plot_df_selected[y_axis], errors="coerce")
+        plot_df_selected = plot_df_selected.dropna(subset=[y_axis]).sort_values(x_axis)
+        if len(plot_df_selected) < 2:
+            return None, "Selected columns are not suitable for a line chart."
         fig = px.line(plot_df_selected, x=x_axis, y=y_axis)
     elif chart_key == "bar":
         if y_axis:
@@ -625,6 +670,10 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
         plot_df_selected = _select_xy_frame(require_y=False)
         if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected histogram column."
+        plot_df_selected[x_axis] = pd.to_numeric(plot_df_selected[x_axis], errors="coerce")
+        plot_df_selected = plot_df_selected.dropna(subset=[x_axis])
+        if len(plot_df_selected) < 2:
+            return None, "Selected column is not suitable for a histogram."
         fig = px.histogram(plot_df_selected, x=x_axis, nbins=30, color_discrete_sequence=["#32d4ff"])
     elif chart_key == "pie":
         if y_axis:
@@ -645,6 +694,10 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             plot_df_selected = plot_df[[selected_y]].dropna()
         if plot_df_selected.empty:
             return None, "No valid rows are available for the selected box plot columns."
+        plot_df_selected[selected_y] = pd.to_numeric(plot_df_selected[selected_y], errors="coerce")
+        plot_df_selected = plot_df_selected.dropna(subset=[selected_y])
+        if len(plot_df_selected) < 2:
+            return None, "Selected columns are not suitable for a box plot."
         fig = px.box(plot_df_selected, x=x_axis if y_axis and x_axis != selected_y else None, y=selected_y, color_discrete_sequence=["#ffb84d"], points="outliers")
     else:
         return None, "Unsupported chart type selected."
