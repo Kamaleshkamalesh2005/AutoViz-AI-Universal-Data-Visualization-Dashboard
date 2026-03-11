@@ -28,6 +28,9 @@ PLOTLY_LAYOUT = {
     "margin": {"l": 20, "r": 20, "t": 55, "b": 20},
 }
 
+CHART_HEIGHT = 340
+MPL_CHART_FIGSIZE = (6.2, 3.4)
+
 
 def apply_dashboard_theme() -> None:
     st.markdown(
@@ -255,7 +258,7 @@ def end_card() -> None:
     return None
 
 
-def finalize_plotly_figure(fig, height: int = 360):
+def finalize_plotly_figure(fig, height: int = CHART_HEIGHT):
     fig.update_layout(height=height, **PLOTLY_LAYOUT)
     return fig
 
@@ -293,7 +296,7 @@ def generate_kde_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) -> l
         plot_df = sample_dataframe(dataframe[[column]].dropna(), max_rows=1500)
         if plot_df.empty:
             continue
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
         sns.kdeplot(plot_df[column], fill=True, color="#32d4ff", linewidth=2, ax=ax)
         ax.set_facecolor("#101a2d")
         fig.patch.set_facecolor("#101a2d")
@@ -348,7 +351,7 @@ def generate_count_plots(dataframe: pd.DataFrame, categorical_columns: list[str]
         if not ordered:
             continue
         plot_df = counts[counts.isin(ordered)].to_frame(name=column)
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
         sns.countplot(data=plot_df, x=column, order=ordered, hue=column, palette="crest", legend=False, ax=ax)
         fig.patch.set_facecolor("#101a2d")
         ax.set_facecolor("#101a2d")
@@ -416,7 +419,7 @@ def generate_heatmap(dataframe: pd.DataFrame, numeric_columns: list[str]) -> plt
     if len(numeric_columns) < 2:
         return None
     correlation = dataframe[numeric_columns].corr(numeric_only=True)
-    fig, ax = plt.subplots(figsize=(7.2, 5.2))
+    fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
     sns.heatmap(correlation, cmap="mako", annot=True, fmt=".2f", linewidths=0.5, ax=ax)
     fig.patch.set_facecolor("#101a2d")
     ax.set_facecolor("#101a2d")
@@ -440,12 +443,12 @@ def generate_missing_values_chart(dataframe: pd.DataFrame):
         color_continuous_scale=["#40203c", "#ff6b9f", "#ffb84d"],
     )
     fig.update_layout(coloraxis_showscale=False)
-    return finalize_plotly_figure(fig, height=320)
+    return finalize_plotly_figure(fig, height=CHART_HEIGHT)
 
 
 def generate_missing_heatmap(dataframe: pd.DataFrame) -> plt.Figure:
     sampled = sample_dataframe(dataframe, max_rows=500)
-    fig, ax = plt.subplots(figsize=(7.2, 3.8))
+    fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
     sns.heatmap(sampled.isna(), cmap="rocket_r", cbar=False, yticklabels=False, ax=ax)
     fig.patch.set_facecolor("#101a2d")
     ax.set_facecolor("#101a2d")
@@ -513,7 +516,7 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
     else:
         return None, "Unsupported chart type selected."
 
-    return finalize_plotly_figure(fig, height=420), None
+    return finalize_plotly_figure(fig, height=CHART_HEIGHT), None
 
 
 def load_default_sample() -> bytes | None:
