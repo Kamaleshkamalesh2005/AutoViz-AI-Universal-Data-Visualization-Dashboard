@@ -24,7 +24,7 @@ A dark-themed, business intelligence style web application built with **Python**
 ### Upload & Load
 - Upload any CSV file via the sidebar
 - Automatically parses and loads the dataset with Streamlit caching for performance
-- Bundled sample dataset (Global Air Pollution) available for instant preview
+- Bundled sample dataset available for instant preview
 
 ### Smart Column Detection
 Automatically detects and classifies every column into:
