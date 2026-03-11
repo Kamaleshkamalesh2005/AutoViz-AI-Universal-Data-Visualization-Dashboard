@@ -181,6 +181,36 @@ def load_dataset(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(BytesIO(file_bytes))
 
 
+def ensure_unique_columns(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    used_names: set[str] = set()
+    seen_counts: dict[str, int] = {}
+    unique_columns: list[str] = []
+    rename_notes: list[str] = []
+
+    for original_name in dataframe.columns:
+        base_name = str(original_name)
+        seen_counts[base_name] = seen_counts.get(base_name, 0) + 1
+
+        if seen_counts[base_name] == 1 and base_name not in used_names:
+            new_name = base_name
+        else:
+            suffix_index = seen_counts[base_name]
+            new_name = f"{base_name}__{suffix_index}"
+            while new_name in used_names:
+                suffix_index += 1
+                new_name = f"{base_name}__{suffix_index}"
+
+        used_names.add(new_name)
+        unique_columns.append(new_name)
+
+        if new_name != base_name:
+            rename_notes.append(f"{base_name} -> {new_name}")
+
+    normalized_df = dataframe.copy()
+    normalized_df.columns = unique_columns
+    return normalized_df, rename_notes
+
+
 def sample_dataframe(dataframe: pd.DataFrame, max_rows: int = 5000) -> pd.DataFrame:
     if len(dataframe) <= max_rows:
         return dataframe.copy()
@@ -650,7 +680,16 @@ def main() -> None:
         st.error(f"Unable to read the CSV file: {error}")
         return
 
-    dataframe, numeric_columns, categorical_columns, datetime_columns = detect_column_types(raw_df)
+    dataframe, renamed_columns = ensure_unique_columns(raw_df)
+    if renamed_columns:
+        with st.sidebar.expander("Renamed duplicate columns", expanded=False):
+            st.caption("Duplicate CSV headers were renamed automatically for compatibility.")
+            for rename_note in renamed_columns[:20]:
+                st.write(rename_note)
+            if len(renamed_columns) > 20:
+                st.write(f"... and {len(renamed_columns) - 20} more")
+
+    dataframe, numeric_columns, categorical_columns, datetime_columns = detect_column_types(dataframe)
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Dataset Information")
