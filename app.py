@@ -259,6 +259,20 @@ def finalize_plotly_figure(fig, height: int = 360):
     return fig
 
 
+def render_dataframe(dataframe: pd.DataFrame, hide_index: bool = False) -> None:
+    try:
+        st.dataframe(dataframe, width="stretch", hide_index=hide_index)
+    except TypeError:
+        st.dataframe(dataframe, use_container_width=True, hide_index=hide_index)
+
+
+def render_plotly(fig) -> None:
+    try:
+        st.plotly_chart(fig, width="stretch")
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True)
+
+
 def generate_histograms(dataframe: pd.DataFrame, numeric_columns: list[str]) -> list:
     figures = []
     sampled = sample_dataframe(dataframe[numeric_columns], max_rows=4000) if numeric_columns else pd.DataFrame()
@@ -511,7 +525,7 @@ def load_default_sample() -> bytes | None:
 def render_plot_card(title: str, subtitle: str, fig=None, mpl_fig: plt.Figure | None = None, empty_message: str = "No chart available.") -> None:
     start_card(title, subtitle)
     if fig is not None:
-        st.plotly_chart(fig, width="stretch")
+        render_plotly(fig)
     elif mpl_fig is not None:
         st.pyplot(mpl_fig, clear_figure=True)
         plt.close(mpl_fig)
@@ -603,7 +617,7 @@ def main() -> None:
     overview_left, overview_right = st.columns([1.4, 1])
     with overview_left:
         start_card("Preview Table", "First 10 rows from the uploaded dataset")
-        st.dataframe(dataframe.head(10), width="stretch")
+        render_dataframe(dataframe.head(10))
         end_card()
     with overview_right:
         start_card("Schema and Types", "Detected columns, missing values, and inferred data categories")
@@ -614,7 +628,7 @@ def main() -> None:
                 "Missing": dataframe.isna().sum().values,
             }
         )
-        st.dataframe(type_df, width="stretch", hide_index=True)
+        render_dataframe(type_df, hide_index=True)
         if selected_numeric:
             st.markdown("".join([f'<span class="schema-chip">Numeric: {column}</span>' for column in selected_numeric]), unsafe_allow_html=True)
         if selected_categorical:
@@ -670,7 +684,7 @@ def main() -> None:
         if custom_error:
             st.warning(custom_error)
         elif custom_chart is not None:
-            st.plotly_chart(custom_chart, width="stretch")
+            render_plotly(custom_chart)
         else:
             st.info("Custom chart could not be generated.")
         end_card()
@@ -714,15 +728,15 @@ def main() -> None:
         end_card()
     with insight_cols[1]:
         start_card("Highest Correlated Features", "Top absolute correlations among numeric features")
-        st.dataframe(top_corr, width="stretch", hide_index=True)
+        render_dataframe(top_corr, hide_index=True)
         end_card()
     with insight_cols[2]:
         start_card("Highest Variance Columns", "Most variable numeric features in the dataset")
-        st.dataframe(top_variance, width="stretch", hide_index=True)
+        render_dataframe(top_variance, hide_index=True)
         end_card()
 
     with st.expander("Detailed Statistics", expanded=False):
-        st.dataframe(build_summary(dataframe, selected_numeric), width="stretch")
+        render_dataframe(build_summary(dataframe, selected_numeric))
 
 
 if __name__ == "__main__":
