@@ -335,17 +335,43 @@ def to_numeric_plot_df(dataframe: pd.DataFrame, columns: list[str]) -> pd.DataFr
 
 
 def figure_has_points(fig) -> bool:
+    """Check if a Plotly figure actually contains data traces (not just empty axes)."""
     if fig is None:
         return False
     if not hasattr(fig, "data") or not fig.data:
         return False
+    
     for trace in fig.data:
-        if hasattr(trace, "x") and trace.x is not None and len(trace.x) > 0:
-            return True
-        if hasattr(trace, "y") and trace.y is not None and len(trace.y) > 0:
-            return True
-        if hasattr(trace, "labels") and trace.labels is not None and len(trace.labels) > 0:
-            return True
+        trace_type = getattr(trace, "type", None) or "scatter"
+        
+        # Check different trace types for data
+        if trace_type in ("scatter", "scattergl", "line"):
+            if hasattr(trace, "x") and trace.x is not None:
+                x_len = len(trace.x) if hasattr(trace.x, "__len__") else (1 if trace.x else 0)
+                if x_len > 0:
+                    return True
+        elif trace_type == "histogram":
+            # Histograms store data in x or y
+            if hasattr(trace, "x") and trace.x is not None:
+                x_len = len(trace.x) if hasattr(trace.x, "__len__") else (1 if trace.x else 0)
+                if x_len > 0:
+                    return True
+        elif trace_type == "pie":
+            if hasattr(trace, "labels") and trace.labels is not None:
+                labels_len = len(trace.labels) if hasattr(trace.labels, "__len__") else (1 if trace.labels else 0)
+                if labels_len > 0:
+                    return True
+        elif trace_type == "box":
+            if hasattr(trace, "y") and trace.y is not None:
+                y_len = len(trace.y) if hasattr(trace.y, "__len__") else (1 if trace.y else 0)
+                if y_len > 0:
+                    return True
+        elif trace_type == "bar":
+            if hasattr(trace, "y") and trace.y is not None:
+                y_len = len(trace.y) if hasattr(trace.y, "__len__") else (1 if trace.y else 0)
+                if y_len > 0:
+                    return True
+    
     return False
 
 
@@ -375,16 +401,29 @@ def build_categorical_counts(dataframe: pd.DataFrame, column: str, limit: int) -
 def generate_histograms(dataframe: pd.DataFrame, numeric_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
-    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=4000) if viable_columns else pd.DataFrame()
+    if not viable_columns:
+        return figures
+    
     palette = ["#32d4ff", "#8a7dff", "#ff6b9f", "#00d084"]
     for index, column in enumerate(viable_columns[:4]):
-        plot_df = sampled[[column]].dropna()
+        # Convert only this column to numeric individually
+        numeric_series = pd.to_numeric(dataframe[column], errors="coerce")
+        plot_df = dataframe[[column]].copy()
+        plot_df[column] = numeric_series
+        plot_df = plot_df.dropna()
+        
         if len(plot_df) < 2:
             continue
-        fig = px.histogram(plot_df, x=column, nbins=30, color_discrete_sequence=[palette[index % len(palette)]])
-        fig = finalize_plotly_figure(fig, height=340)
-        if figure_has_points(fig):
-            figures.append(fig)
+        
+        try:
+            fig = px.histogram(plot_df, x=column, nbins=30, color_discrete_sequence=[palette[index % len(palette)]])
+            fig = finalize_plotly_figure(fig, height=340)
+            if figure_has_points(fig):
+                figures.append(fig)
+        except Exception:
+            # Skip this histogram if it fails
+            continue
+    
     return figures
 
 
@@ -394,22 +433,31 @@ def generate_kde_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) -> l
     if not viable_columns:
         return figures
 
-    numeric_df = to_numeric_plot_df(dataframe, viable_columns)
     for column in viable_columns[:3]:
-        plot_df = sample_dataframe(numeric_df[[column]].dropna(), max_rows=1500)
+        numeric_series = pd.to_numeric(dataframe[column], errors="coerce")
+        plot_df = dataframe[[column]].copy()
+        plot_df[column] = numeric_series
+        plot_df = plot_df.dropna()
+        plot_df = sample_dataframe(plot_df, max_rows=1500)
+        
         if len(plot_df) < 3:
             continue
-        fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
-        sns.kdeplot(plot_df[column], fill=True, color="#32d4ff", linewidth=2, ax=ax)
-        ax.set_facecolor("#101a2d")
-        fig.patch.set_facecolor("#101a2d")
-        ax.tick_params(colors="#dce7ff")
-        ax.set_title(f"KDE Plot: {column}", color="#eef3ff")
-        ax.set_xlabel(column, color="#dce7ff")
-        ax.set_ylabel("Density", color="#dce7ff")
-        for spine in ax.spines.values():
-            spine.set_color("#304562")
-        figures.append(fig)
+        
+        try:
+            fig, ax = plt.subplots(figsize=MPL_CHART_FIGSIZE)
+            sns.kdeplot(plot_df[column], fill=True, color="#32d4ff", linewidth=2, ax=ax)
+            ax.set_facecolor("#101a2d")
+            fig.patch.set_facecolor("#101a2d")
+            ax.tick_params(colors="#dce7ff")
+            ax.set_title(f"KDE Plot: {column}", color="#eef3ff")
+            ax.set_xlabel(column, color="#dce7ff")
+            ax.set_ylabel("Density", color="#dce7ff")
+            for spine in ax.spines.values():
+                spine.set_color("#304562")
+            figures.append(fig)
+        except Exception:
+            continue
+    
     return figures
 
 
@@ -478,72 +526,111 @@ def generate_scatter_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) 
     if len(viable_columns) < 2:
         return figures
 
-    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=2500)
     ranked = dataframe[viable_columns].var(numeric_only=True).sort_values(ascending=False).index.tolist()
     selected = ranked[: min(4, len(ranked))]
+    
     for index in range(len(selected) - 1):
         x_axis = selected[index]
         y_axis = selected[index + 1]
-        plot_df = sampled[[x_axis, y_axis]].dropna()
+        
+        # Convert columns individually
+        plot_df = dataframe[[x_axis, y_axis]].copy()
+        plot_df[x_axis] = pd.to_numeric(plot_df[x_axis], errors="coerce")
+        plot_df[y_axis] = pd.to_numeric(plot_df[y_axis], errors="coerce")
+        plot_df = plot_df.dropna()
+        plot_df = sample_dataframe(plot_df, max_rows=2500)
+        
         if len(plot_df) < 2:
             continue
-        fig = px.scatter(
-            plot_df,
-            x=x_axis,
-            y=y_axis,
-            color=y_axis,
-            color_continuous_scale=["#16324f", "#32d4ff", "#ff6b9f"],
-            opacity=0.8,
-        )
-        fig.update_layout(coloraxis_showscale=False)
-        fig = finalize_plotly_figure(fig, height=340)
-        if figure_has_points(fig):
-            figures.append(fig)
+        
+        try:
+            fig = px.scatter(
+                plot_df,
+                x=x_axis,
+                y=y_axis,
+                color=y_axis,
+                color_continuous_scale=["#16324f", "#32d4ff", "#ff6b9f"],
+                opacity=0.8,
+            )
+            fig.update_layout(coloraxis_showscale=False)
+            fig = finalize_plotly_figure(fig, height=340)
+            if figure_has_points(fig):
+                figures.append(fig)
+        except Exception:
+            continue
+    
     return figures
 
 
 def generate_line_charts(dataframe: pd.DataFrame, numeric_columns: list[str], datetime_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
-    numeric_df = to_numeric_plot_df(dataframe, viable_columns) if viable_columns else pd.DataFrame()
-    if datetime_columns and viable_columns:
+    if not viable_columns:
+        return figures
+    
+    # Try datetime + numeric combination first
+    if datetime_columns:
         time_column = datetime_columns[0]
         line_column = viable_columns[0]
-        plot_df = pd.concat([dataframe[[time_column]], numeric_df[[line_column]]], axis=1)
-        plot_df = plot_df.dropna(subset=[time_column, line_column]).sort_values(time_column)
-        plot_df = sample_dataframe(plot_df, max_rows=3000)
-        if len(plot_df) < 2:
-            return figures
-        line_fig = px.line(plot_df, x=time_column, y=line_column, color_discrete_sequence=["#32d4ff"])
-        line_fig = finalize_plotly_figure(line_fig, height=340)
-        if figure_has_points(line_fig):
-            figures.append(line_fig)
-        return figures
-
+        try:
+            plot_df = pd.concat([dataframe[[time_column]], dataframe[[line_column]]], axis=1)
+            plot_df[line_column] = pd.to_numeric(plot_df[line_column], errors="coerce")
+            plot_df = plot_df.dropna(subset=[time_column, line_column]).sort_values(time_column)
+            plot_df = sample_dataframe(plot_df, max_rows=3000)
+            
+            if len(plot_df) >= 2:
+                line_fig = px.line(plot_df, x=time_column, y=line_column, color_discrete_sequence=["#32d4ff"])
+                line_fig = finalize_plotly_figure(line_fig, height=340)
+                if figure_has_points(line_fig):
+                    figures.append(line_fig)
+                    return figures
+        except Exception:
+            pass
+    
+    # Fall back to index-based line chart
     if viable_columns:
         line_column = viable_columns[0]
-        plot_df = sample_dataframe(numeric_df[[line_column]].dropna().reset_index(), max_rows=2500)
-        if len(plot_df) < 2:
-            return figures
-        line_fig = px.line(plot_df, x="index", y=line_column, color_discrete_sequence=["#32d4ff"])
-        line_fig = finalize_plotly_figure(line_fig, height=340)
-        if figure_has_points(line_fig):
-            figures.append(line_fig)
+        plot_df = dataframe[[line_column]].copy()
+        plot_df[line_column] = pd.to_numeric(plot_df[line_column], errors="coerce")
+        plot_df = plot_df.dropna()
+        plot_df = sample_dataframe(plot_df, max_rows=2500).reset_index()
+        
+        if len(plot_df) >= 2:
+            try:
+                line_fig = px.line(plot_df, x="index", y=line_column, color_discrete_sequence=["#32d4ff"])
+                line_fig = finalize_plotly_figure(line_fig, height=340)
+                if figure_has_points(line_fig):
+                    figures.append(line_fig)
+            except Exception:
+                pass
+    
     return figures
 
 
 def generate_box_plots(dataframe: pd.DataFrame, numeric_columns: list[str]) -> list:
     figures = []
     viable_columns = get_viable_numeric_columns(dataframe, numeric_columns)
-    sampled = sample_dataframe(to_numeric_plot_df(dataframe, viable_columns), max_rows=3500) if viable_columns else pd.DataFrame()
+    if not viable_columns:
+        return figures
+    
     for column in viable_columns[:4]:
-        plot_df = sampled[[column]].dropna()
+        plot_df = dataframe[[column]].copy()
+        plot_df[column] = pd.to_numeric(plot_df[column], errors="coerce")
+        plot_df = plot_df.dropna()
+        
         if len(plot_df) < 2:
             continue
-        fig = px.box(plot_df, y=column, color_discrete_sequence=["#ffb84d"], points="outliers")
-        fig = finalize_plotly_figure(fig, height=340)
-        if figure_has_points(fig):
-            figures.append(fig)
+        
+        plot_df = sample_dataframe(plot_df, max_rows=3500)
+        
+        try:
+            fig = px.box(plot_df, y=column, color_discrete_sequence=["#ffb84d"], points="outliers")
+            fig = finalize_plotly_figure(fig, height=340)
+            if figure_has_points(fig):
+                figures.append(fig)
+        except Exception:
+            continue
+    
     return figures
 
 
