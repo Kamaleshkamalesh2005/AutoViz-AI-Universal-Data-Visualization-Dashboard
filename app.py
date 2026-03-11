@@ -297,7 +297,14 @@ def end_card() -> None:
 
 def finalize_plotly_figure(fig, height: int = CHART_HEIGHT):
     fig.update_layout(height=height, **PLOTLY_LAYOUT)
-    fig.update_layout(margin=dict(l=10, r=10, t=35, b=10), autosize=True)
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=35, b=10),
+        autosize=True,
+        uirevision="stable",
+        transition_duration=0,
+    )
+    fig.update_xaxes(automargin=False)
+    fig.update_yaxes(automargin=False)
     return fig
 
 
@@ -309,7 +316,11 @@ def render_dataframe(dataframe: pd.DataFrame, hide_index: bool = False) -> None:
 
 
 def render_plotly(fig) -> None:
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": False, "scrollZoom": False},
+    )
 
 
 def truncate_label(value: object, max_length: int = MAX_CATEGORY_LABEL_LENGTH) -> str:
