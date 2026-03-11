@@ -134,7 +134,7 @@ Key reusable functions inside `app.py`:
 
 | Function | Description |
 |---|---|
-| `load_dataset()` | Cached CSV loader using `pd.read_csv` |
+| `load_data()` | Cached CSV loader using `pd.read_csv` |
 | `detect_column_types()` | Auto-classifies columns as numeric, categorical, or datetime |
 | `build_summary()` | Extended `describe()` output with variance column |
 | `generate_histograms()` | Plotly histograms for numeric columns |

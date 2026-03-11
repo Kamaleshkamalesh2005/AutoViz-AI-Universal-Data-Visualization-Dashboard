@@ -177,11 +177,6 @@ def apply_dashboard_theme() -> None:
 
 
 @st.cache_data(show_spinner=False)
-def load_dataset(file_bytes: bytes) -> pd.DataFrame:
-    return pd.read_csv(BytesIO(file_bytes))
-
-
-@st.cache_data(show_spinner=False)
 def load_data(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(BytesIO(file_bytes))
 
@@ -300,7 +295,7 @@ def finalize_plotly_figure(fig, height: int = CHART_HEIGHT):
     fig.update_layout(
         margin=dict(l=10, r=10, t=35, b=10),
         autosize=True,
-        uirevision="stable",
+        uirevision="fixed",
         transition_duration=0,
     )
     fig.update_xaxes(automargin=False)
@@ -319,7 +314,12 @@ def render_plotly(fig) -> None:
     st.plotly_chart(
         fig,
         use_container_width=True,
-        config={"displayModeBar": False, "responsive": False, "scrollZoom": False},
+        config={
+            "displayModeBar": False,
+            "responsive": False,
+            "scrollZoom": False,
+            "staticPlot": False,
+        },
     )
 
 
@@ -836,7 +836,7 @@ def load_default_sample() -> bytes | None:
 
 def render_plot_card(title: str, subtitle: str, fig=None, mpl_fig: plt.Figure | None = None, empty_message: str = "No chart available.") -> None:
     start_card(title, subtitle)
-    if fig is not None:
+    if fig is not None and figure_has_points(fig):
         render_plotly(fig)
     elif mpl_fig is not None:
         st.pyplot(mpl_fig, clear_figure=True)
@@ -885,6 +885,7 @@ def main() -> None:
         return
 
     dataframe, renamed_columns = ensure_unique_columns(raw_df)
+    dataframe = sample_dataframe(dataframe, max_rows=5000)
     if renamed_columns:
         with st.sidebar.expander("Renamed duplicate columns", expanded=False):
             st.caption("Duplicate CSV headers were renamed automatically for compatibility.")
@@ -894,7 +895,7 @@ def main() -> None:
                 st.write(f"... and {len(renamed_columns) - 20} more")
 
     dataframe, numeric_columns, categorical_columns, datetime_columns = detect_column_types(dataframe)
-    viz_dataframe = sample_dataframe(dataframe, max_rows=5000)
+    viz_dataframe = dataframe
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Dataset Information")
