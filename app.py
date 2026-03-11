@@ -299,16 +299,16 @@ def finalize_plotly_figure(fig, height: int = CHART_HEIGHT):
 
 def render_dataframe(dataframe: pd.DataFrame, hide_index: bool = False) -> None:
     try:
-        st.dataframe(dataframe, width="stretch", hide_index=hide_index)
-    except TypeError:
         st.dataframe(dataframe, use_container_width=True, hide_index=hide_index)
+    except TypeError:
+        st.dataframe(dataframe, width="stretch", hide_index=hide_index)
 
 
 def render_plotly(fig) -> None:
     try:
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "responsive": True})
-    except TypeError:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+    except TypeError:
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "responsive": True})
 
 
 def truncate_label(value: object, max_length: int = MAX_CATEGORY_LABEL_LENGTH) -> str:
@@ -325,6 +325,22 @@ def get_viable_numeric_columns(dataframe: pd.DataFrame, numeric_columns: list[st
         if len(series) >= 2 and series.nunique() >= min_unique_values:
             viable_columns.append(column)
     return viable_columns
+
+
+def get_viable_categorical_columns(dataframe: pd.DataFrame, categorical_columns: list[str], min_unique_values: int = 2) -> list[str]:
+    viable_columns: list[str] = []
+    for column in categorical_columns:
+        series = dataframe[column].dropna().astype(str)
+        if len(series) >= 2 and series.nunique() >= min_unique_values:
+            viable_columns.append(column)
+    return viable_columns
+
+
+def select_effective_columns(selected_columns: list[str], viable_columns: list[str], max_columns: int) -> list[str]:
+    effective = [column for column in selected_columns if column in viable_columns]
+    if effective:
+        return effective[:max_columns]
+    return viable_columns[:max_columns]
 
 
 def build_categorical_counts(dataframe: pd.DataFrame, column: str, limit: int) -> pd.DataFrame:
@@ -736,6 +752,22 @@ def main() -> None:
     if not selected_datetime:
         selected_datetime = datetime_columns[:1]
 
+    viable_numeric_columns = get_viable_numeric_columns(dataframe, numeric_columns)
+    viable_categorical_columns = get_viable_categorical_columns(dataframe, categorical_columns)
+
+    effective_numeric_columns = select_effective_columns(selected_numeric, viable_numeric_columns, max_columns=6)
+    effective_categorical_columns = select_effective_columns(selected_categorical, viable_categorical_columns, max_columns=4)
+
+    if selected_datetime:
+        effective_datetime_columns = [column for column in selected_datetime if column in dataframe.columns]
+    else:
+        effective_datetime_columns = datetime_columns[:1]
+
+    if not effective_numeric_columns:
+        st.warning("No usable numeric columns with sufficient data were found for automatic numeric charts.")
+    if not effective_categorical_columns:
+        st.warning("No usable categorical columns with sufficient variety were found for category charts.")
+
     st.sidebar.markdown("---")
     st.sidebar.subheader("Chart Selection Options")
     chart_type = st.sidebar.selectbox("Chart type", ["scatter", "line", "bar", "histogram", "pie", "box"])
@@ -760,11 +792,11 @@ def main() -> None:
         )
         render_dataframe(type_df, hide_index=True)
         if selected_numeric:
-            st.markdown("".join([f'<span class="schema-chip">Numeric: {column}</span>' for column in selected_numeric]), unsafe_allow_html=True)
-        if selected_categorical:
-            st.markdown("".join([f'<span class="schema-chip">Category: {column}</span>' for column in selected_categorical]), unsafe_allow_html=True)
-        if selected_datetime:
-            st.markdown("".join([f'<span class="schema-chip">Datetime: {column}</span>' for column in selected_datetime]), unsafe_allow_html=True)
+            st.markdown("".join([f'<span class="schema-chip">Numeric: {column}</span>' for column in effective_numeric_columns]), unsafe_allow_html=True)
+        if effective_categorical_columns:
+            st.markdown("".join([f'<span class="schema-chip">Category: {column}</span>' for column in effective_categorical_columns]), unsafe_allow_html=True)
+        if effective_datetime_columns:
+            st.markdown("".join([f'<span class="schema-chip">Datetime: {column}</span>' for column in effective_datetime_columns]), unsafe_allow_html=True)
         end_card()
 
     st.markdown('<div class="section-title">KPI Metrics</div>', unsafe_allow_html=True)
@@ -778,16 +810,16 @@ def main() -> None:
     with metric_cols[3]:
         render_metric_card("Categorical Features", f"{len(categorical_columns):,}", "linear-gradient(90deg, #ff6b9f, #8a7dff)")
 
-    histograms = generate_histograms(dataframe, selected_numeric)
-    scatter_plots = generate_scatter_plots(dataframe, selected_numeric)
-    pie_charts = generate_pie_charts(dataframe, selected_categorical)
-    bar_charts = generate_bar_charts(dataframe, selected_categorical)
-    box_plots = generate_box_plots(dataframe, selected_numeric)
-    line_charts = generate_line_charts(dataframe, selected_numeric, selected_datetime)
-    correlation_heatmap = generate_heatmap(dataframe, selected_numeric)
+    histograms = generate_histograms(dataframe, effective_numeric_columns)
+    scatter_plots = generate_scatter_plots(dataframe, effective_numeric_columns)
+    pie_charts = generate_pie_charts(dataframe, effective_categorical_columns)
+    bar_charts = generate_bar_charts(dataframe, effective_categorical_columns)
+    box_plots = generate_box_plots(dataframe, effective_numeric_columns)
+    line_charts = generate_line_charts(dataframe, effective_numeric_columns, effective_datetime_columns)
+    correlation_heatmap = generate_heatmap(dataframe, effective_numeric_columns)
     custom_chart, custom_error = render_custom_chart(dataframe, chart_type, x_axis, y_axis)
-    kde_figs = generate_kde_plots(dataframe, selected_numeric)
-    count_figs = generate_count_plots(dataframe, selected_categorical)
+    kde_figs = generate_kde_plots(dataframe, effective_numeric_columns)
+    count_figs = generate_count_plots(dataframe, effective_categorical_columns)
 
     st.markdown('<div class="section-title">Automatic Chart Generation</div>', unsafe_allow_html=True)
     row2 = st.columns(3)
@@ -848,12 +880,12 @@ def main() -> None:
         render_plot_card("Missing Data Heatmap", "Row and column level view of gaps in the dataset", mpl_fig=generate_missing_heatmap(dataframe))
 
     st.markdown('<div class="section-title">Dataset Insights</div>', unsafe_allow_html=True)
-    top_corr, top_variance, summary_text = generate_dataset_insights(dataframe, selected_numeric, selected_categorical)
+    top_corr, top_variance, summary_text = generate_dataset_insights(dataframe, effective_numeric_columns, effective_categorical_columns)
     insight_cols = st.columns([1.1, 1, 1])
     with insight_cols[0]:
         start_card("Summary", "Automatic business intelligence style overview")
         st.write(summary_text)
-        st.write(f"Detected datetime columns: {selected_datetime or 'None'}")
+        st.write(f"Detected datetime columns: {effective_datetime_columns or 'None'}")
         st.write(f"Dataset shape: {dataframe.shape[0]:,} rows x {dataframe.shape[1]:,} columns")
         end_card()
     with insight_cols[1]:
@@ -866,7 +898,7 @@ def main() -> None:
         end_card()
 
     with st.expander("Detailed Statistics", expanded=False):
-        render_dataframe(build_summary(dataframe, selected_numeric))
+        render_dataframe(build_summary(dataframe, effective_numeric_columns))
 
 
 if __name__ == "__main__":
