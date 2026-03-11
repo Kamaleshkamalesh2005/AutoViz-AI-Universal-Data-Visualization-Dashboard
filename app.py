@@ -567,27 +567,38 @@ def generate_dataset_insights(dataframe: pd.DataFrame, numeric_columns: list[str
 
 def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y_axis: str | None):
     plot_df = sample_dataframe(dataframe, max_rows=4000)
+
+    def _select_xy_frame(require_y: bool = True) -> pd.DataFrame | None:
+        if require_y and not y_axis:
+            return None
+        if y_axis and x_axis == y_axis:
+            return plot_df[[x_axis]].dropna()
+        if y_axis:
+            return plot_df[[x_axis, y_axis]].dropna()
+        return plot_df[[x_axis]].dropna()
+
     chart_key = chart_type.lower()
     if chart_key == "scatter":
         if not y_axis:
             return None, "Select both X and Y axes for a scatter chart."
-        plot_df = plot_df[[x_axis, y_axis]].dropna()
-        if plot_df.empty:
+        plot_df_selected = _select_xy_frame(require_y=True)
+        if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected scatter chart columns."
-        fig = px.scatter(plot_df, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="tealrose")
+        fig = px.scatter(plot_df_selected, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="tealrose")
     elif chart_key == "line":
         if not y_axis:
             return None, "Select both X and Y axes for a line chart."
-        plot_df = plot_df[[x_axis, y_axis]].dropna().sort_values(x_axis)
-        if plot_df.empty:
+        plot_df_selected = _select_xy_frame(require_y=True)
+        if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected line chart columns."
-        fig = px.line(plot_df, x=x_axis, y=y_axis)
+        plot_df_selected = plot_df_selected.sort_values(x_axis)
+        fig = px.line(plot_df_selected, x=x_axis, y=y_axis)
     elif chart_key == "bar":
         if y_axis:
-            plot_df = plot_df[[x_axis, y_axis]].dropna()
-            if plot_df.empty:
+            plot_df_selected = _select_xy_frame(require_y=True)
+            if plot_df_selected is None or plot_df_selected.empty:
                 return None, "No valid rows are available for the selected bar chart columns."
-            fig = px.bar(plot_df, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="viridis")
+            fig = px.bar(plot_df_selected, x=x_axis, y=y_axis, color=y_axis, color_continuous_scale="viridis")
         else:
             counts = build_categorical_counts(plot_df, x_axis, limit=10)
             if counts.empty:
@@ -595,13 +606,13 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             fig = px.bar(counts, x=f"{x_axis}_label", y="Count", color="Count", color_continuous_scale="viridis")
             fig.update_xaxes(title_text=x_axis, tickangle=-25)
     elif chart_key == "histogram":
-        plot_df = plot_df[[x_axis]].dropna()
-        if plot_df.empty:
+        plot_df_selected = _select_xy_frame(require_y=False)
+        if plot_df_selected is None or plot_df_selected.empty:
             return None, "No valid rows are available for the selected histogram column."
-        fig = px.histogram(plot_df, x=x_axis, nbins=30, color_discrete_sequence=["#32d4ff"])
+        fig = px.histogram(plot_df_selected, x=x_axis, nbins=30, color_discrete_sequence=["#32d4ff"])
     elif chart_key == "pie":
         if y_axis:
-            pie_df = plot_df[[x_axis, y_axis]].dropna()
+            pie_df = _select_xy_frame(require_y=True)
             if pie_df.empty:
                 return None, "No valid rows are available for the selected pie chart columns."
             fig = px.pie(pie_df, names=x_axis, values=y_axis)
@@ -612,11 +623,13 @@ def render_custom_chart(dataframe: pd.DataFrame, chart_type: str, x_axis: str, y
             fig = px.pie(counts, names=f"{x_axis}_label", values="Count")
     elif chart_key == "box":
         selected_y = y_axis or x_axis
-        plot_columns = [selected_y] if not y_axis else [x_axis, selected_y]
-        plot_df = plot_df[plot_columns].dropna()
-        if plot_df.empty:
+        if y_axis and x_axis != selected_y:
+            plot_df_selected = plot_df[[x_axis, selected_y]].dropna()
+        else:
+            plot_df_selected = plot_df[[selected_y]].dropna()
+        if plot_df_selected.empty:
             return None, "No valid rows are available for the selected box plot columns."
-        fig = px.box(plot_df, x=x_axis if y_axis else None, y=selected_y, color_discrete_sequence=["#ffb84d"], points="outliers")
+        fig = px.box(plot_df_selected, x=x_axis if y_axis and x_axis != selected_y else None, y=selected_y, color_discrete_sequence=["#ffb84d"], points="outliers")
     else:
         return None, "Unsupported chart type selected."
 
